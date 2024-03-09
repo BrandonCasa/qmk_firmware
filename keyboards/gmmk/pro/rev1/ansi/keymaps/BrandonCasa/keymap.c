@@ -89,7 +89,7 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // Variables for press detection
 uint16_t encoder_timer = 0;
 uint8_t encoder_press_count = 0;
-uint16_t encoder_timeout = 300;
+uint16_t encoder_timeout_add = 0;
 
 bool encoder_update_user(uint8_t index, bool clockwise) {
     if (index == 0) { // First encoder
@@ -105,7 +105,7 @@ bool encoder_update_user(uint8_t index, bool clockwise) {
 }
 
 void matrix_scan_user(void) {
-    if (encoder_timer && timer_elapsed(encoder_timer) > encoder_timeout) {
+    if (encoder_timer && timer_elapsed(encoder_timer) - encoder_timeout_add > 550) {
         if (encoder_press_count == 3) {
             // Skip to the previous song
             tap_code(KC_MEDIA_PREV_TRACK);
@@ -119,7 +119,7 @@ void matrix_scan_user(void) {
         // Reset timer and other variables
         encoder_timer = 0;
         encoder_press_count = 0;
-        encoder_timeout = 300;
+        encoder_timeout_add = 0;
     }
 }
 
@@ -129,9 +129,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             if (record->event.pressed) {
                 // Increment the press count
                 encoder_press_count++;
-                encoder_timeout += 250;
                 // Timer
                 encoder_timer = timer_read();
+                // Extend Timer
+                encoder_timeout_add = timer_elapsed(encoder_timer);
             }
             return false; // Block key from passing through
         default:
