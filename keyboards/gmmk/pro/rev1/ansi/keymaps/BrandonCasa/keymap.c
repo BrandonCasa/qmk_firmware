@@ -79,7 +79,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
 #if defined(ENCODER_MAP_ENABLE)
 const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
-    [0] = { ENCODER_CCW_CW(KC_VOLU, KC_VOLD) },
+    [0] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
     [1] = { ENCODER_CCW_CW(KC_TRNS, KC_TRNS) },
     [2] = { ENCODER_CCW_CW(KC_TRNS, KC_TRNS) },
     [3] = { ENCODER_CCW_CW(KC_TRNS, KC_TRNS) }
@@ -89,7 +89,7 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 // Variables for press detection
 uint16_t encoder_timer = 0;
 uint8_t encoder_press_count = 0;
-uint16_t encoder_timeout = 450;
+uint16_t encoder_timeout = 300;
 
 bool encoder_update_user(uint8_t index, bool clockwise) {
     if (index == 0) { // First encoder
@@ -119,7 +119,7 @@ void matrix_scan_user(void) {
         // Reset timer and other variables
         encoder_timer = 0;
         encoder_press_count = 0;
-        encoder_timeout = 450;
+        encoder_timeout = 300;
     }
 }
 
@@ -129,7 +129,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             if (record->event.pressed) {
                 // Increment the press count
                 encoder_press_count++;
-                encoder_timeout += 450;
+                encoder_timeout += 250;
                 // Timer
                 encoder_timer = timer_read();
             }
