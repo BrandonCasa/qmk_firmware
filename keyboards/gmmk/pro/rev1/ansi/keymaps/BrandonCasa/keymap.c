@@ -95,10 +95,10 @@ bool encoder_update_user(uint8_t index, bool clockwise) {
     if (index == 0) { // First encoder
         if (clockwise) {
             // Volume Down
-            tap_code_delay(KC_VOLD, 10);
+            tap_code_delay(KC_VOLU, 10);
         } else {
             // Volume Up
-            tap_code_delay(KC_VOLU, 10);
+            tap_code_delay(KC_VOLD, 10);
         }
     }
     return false;
