@@ -28,60 +28,185 @@ bool a_pressed = false;
 bool s_pressed = false;
 bool d_pressed = false;
 
-uint16_t last_horizontal_key = 0;
-uint16_t last_vertical_key = 0;
+uint16_t horizontal_to_unregister = 0;
+uint16_t vertical_to_unregister = 0;
+
+uint16_t previous_horizontal_key = 0;
+uint16_t previous_vertical_key = 0;
+
+uint16_t current_horizontal_key = 0;
+uint16_t current_vertical_key = 0;
 
 void update_key_state(uint16_t keycode, bool pressed) {
     switch (keycode) {
-        case L_W:
+        case L_W: // virtual 'W' key
+            if (w_pressed == pressed) break;
             w_pressed = pressed;
-            if (pressed) last_vertical_key = L_W;
+            if (pressed && !s_pressed) {
+                // 'W' key down    <- event
+                // 'S' key up
+                // Real input to 'W' from 'none'
+                current_vertical_key = KC_W;
+                vertical_to_unregister = 0;
+            }
+            else if (pressed && s_pressed) {
+                // 'W' key down    <- event
+                // 'S' key down
+                // Real input to 'W' from 'S'
+                current_vertical_key = KC_W;
+                vertical_to_unregister = KC_S;
+            }
+            else if (!pressed && !s_pressed) {
+                // 'W' key up    <- event
+                // 'S' key up
+                // Real input to 'none' from 'W'
+                current_vertical_key = 0;
+                vertical_to_unregister = KC_W;
+            }
+            else if (!pressed && s_pressed && current_vertical_key == KC_W) {
+                // 'W' key up    <- event
+                // 'S' key down
+                // Real input to 'S' from 'W'
+                current_vertical_key = KC_S;
+                vertical_to_unregister = KC_W;
+            }
+            else if (!pressed && s_pressed && current_vertical_key == KC_S) {
+                // 'W' key up    <- event
+                // 'S' key down
+                // Real input to 'S' from 'S'
+            }
             break;
-        case L_A:
+        case L_A: // virtual 'A' key
+            if (a_pressed == pressed) break;
             a_pressed = pressed;
-            if (pressed) last_horizontal_key = L_A;
+            if (pressed && !d_pressed) {
+                // 'A' key down    <- event
+                // 'D' key up
+                // Real input to 'A' from 'none'
+                current_horizontal_key = KC_A;
+                horizontal_to_unregister = 0;
+            }
+            else if (pressed && d_pressed) {
+                // 'A' key down    <- event
+                // 'D' key down
+                // Real input to 'A' from 'D'
+                current_horizontal_key = KC_A;
+                horizontal_to_unregister = KC_D;
+            }
+            else if (!pressed && !d_pressed) {
+                // 'A' key up    <- event
+                // 'D' key up
+                // Real input to 'none' from 'A'
+                current_horizontal_key = 0;
+                horizontal_to_unregister = KC_A;
+            }
+            else if (!pressed && d_pressed && current_horizontal_key == KC_A) {
+                // 'A' key up    <- event
+                // 'D' key down
+                // Real input to 'D' from 'A'
+                current_horizontal_key = KC_D;
+                horizontal_to_unregister = KC_A;
+            }
+            else if (!pressed && d_pressed && current_horizontal_key == KC_D) {
+                // 'A' key up    <- event
+                // 'D' key down
+                // Real input to 'D' from 'D'
+            }
             break;
-        case L_S:
+        case L_S: // virtual 'S' key
+            if (s_pressed == pressed) break;
             s_pressed = pressed;
-            if (pressed) last_vertical_key = L_S;
+            if (pressed && !w_pressed) {
+                // 'W' key up
+                // 'S' key down    <- event
+                // Real input to 'S' from 'none'
+                current_vertical_key = KC_S;
+                vertical_to_unregister = 0;
+            }
+            else if (pressed && w_pressed) {
+                // 'W' key down
+                // 'S' key down    <- event
+                // Real input to 'S' from 'W'
+                current_vertical_key = KC_S;
+                vertical_to_unregister = KC_W;
+            }
+            else if (!pressed && !w_pressed) {
+                // 'W' key up
+                // 'S' key up    <- event
+                // Real input to 'none' from 'S'
+                current_vertical_key = 0;
+                vertical_to_unregister = KC_S;
+            }
+            else if (!pressed && w_pressed && current_vertical_key == KC_S) {
+                // 'W' key down
+                // 'S' key up    <- event
+                // Real input to 'W' from 'S'
+                current_vertical_key = KC_W;
+                vertical_to_unregister = KC_S;
+            }
+            else if (!pressed && w_pressed && current_vertical_key == KC_W) {
+                // 'W' key down
+                // 'S' key up    <- event
+                // Real input to 'W' from 'W'
+            }
             break;
-        case L_D:
+        case L_D: // virtual 'D' key
+            if (d_pressed == pressed) break;
             d_pressed = pressed;
-            if (pressed) last_horizontal_key = L_D;
+            if (pressed && !a_pressed) {
+                // 'A' key up
+                // 'D' key down    <- event
+                // Real input to 'D' from 'none'
+                current_horizontal_key = KC_D;
+                horizontal_to_unregister = 0;
+            }
+            else if (pressed && a_pressed) {
+                // 'A' key down
+                // 'D' key down    <- event
+                // Real input to 'D' from 'A'
+                current_horizontal_key = KC_D;
+                horizontal_to_unregister = KC_A;
+            }
+            else if (!pressed && !a_pressed) {
+                // 'A' key up
+                // 'D' key up    <- event
+                // Real input to 'none' from 'D'
+                current_horizontal_key = 0;
+                horizontal_to_unregister = KC_D;
+            }
+            else if (!pressed && a_pressed && current_horizontal_key == KC_D) {
+                // 'A' key down
+                // 'D' key up    <- event
+                // Real input to 'A' from 'D'
+                current_horizontal_key = KC_A;
+                horizontal_to_unregister = KC_D;
+            }
+            else if (!pressed && a_pressed && current_horizontal_key == KC_A) {
+                // 'A' key down
+                // 'D' key up    <- event
+                // Real input to 'A' from 'A'
+            }
             break;
     }
 
-    if (w_pressed && !s_pressed) {
-        register_code(KC_W);
-        unregister_code(KC_S);
-    } else if (!w_pressed && s_pressed) {
-        register_code(KC_S);
-        unregister_code(KC_W);
-    } else if (!w_pressed && !s_pressed) {
-        unregister_code(KC_W);
-        unregister_code(KC_S);
+    // Vertical Update
+    if (vertical_to_unregister != 0) {
+        unregister_code(vertical_to_unregister);
+        vertical_to_unregister = 0;
+    }
+    if (current_vertical_key != 0 && previous_vertical_key != current_vertical_key) {
+        register_code(current_vertical_key);
+        previous_vertical_key = current_vertical_key;
     }
 
-    if (a_pressed && !d_pressed) {
-        register_code(KC_A);
-        unregister_code(KC_D);
-    } else if (!a_pressed && d_pressed) {
-        register_code(KC_D);
-        unregister_code(KC_A);
-    } else if (!a_pressed && !d_pressed) {
-        unregister_code(KC_A);
-        unregister_code(KC_D);
+    // Horizontal Update
+    if (horizontal_to_unregister != 0) {
+        unregister_code(horizontal_to_unregister);
+        horizontal_to_unregister = 0;
     }
-
-    if (!pressed) {
-        if (keycode == last_horizontal_key) {
-            if (a_pressed && last_horizontal_key == L_A) register_code(KC_A);
-            if (d_pressed && last_horizontal_key == L_D) register_code(KC_D);
-        }
-        if (keycode == last_vertical_key) {
-            if (w_pressed && last_vertical_key == L_W) register_code(KC_W);
-            if (s_pressed && last_vertical_key == L_S) register_code(KC_S);
-        }
+    if (current_horizontal_key != 0 && previous_horizontal_key != current_horizontal_key) {
+        register_code(current_horizontal_key);
+        previous_horizontal_key = current_horizontal_key;
     }
 }
 
@@ -144,7 +269,3 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
     [1] = { ENCODER_CCW_CW(KC_TRNS, KC_TRNS) }
 };
 #endif
-
-void matrix_scan_user(void) {
-    // Add any periodic tasks here if needed
-}
