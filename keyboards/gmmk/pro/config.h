@@ -25,4 +25,4 @@
 #define AW20216S_CS_PIN_2 B14
 #define AW20216S_EN_PIN C13
 
-#define DEBOUNCE 18
+#define DEBOUNCE 8

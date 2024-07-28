@@ -1,3 +1,3 @@
 ENCODER_MAP_ENABLE = yes
-DEBOUNCE_TYPE = sym_eager_pk
+DEBOUNCE_TYPE = sym_defer_g
 USB_POLLING_INTERVAL_MS = 1
