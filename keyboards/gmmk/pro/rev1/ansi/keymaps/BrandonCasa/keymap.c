@@ -1,48 +1,108 @@
 /* Copyright 2021 Glorious, LLC <salman@pcgamingrace.com>
-
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 2 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
-*/
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 #include QMK_KEYBOARD_H
+
+// -- custom virtual WASD keys --
+enum custom_keycodes {
+    L_W = SAFE_RANGE,
+    L_S,
+    L_A,
+    L_D
+};
+
+// -- generic axis struct and state --
+typedef struct {
+    bool     pos_pressed;
+    bool     neg_pressed;
+    uint16_t pos_keycode;
+    uint16_t neg_keycode;
+    uint16_t current_key;
+} axis_t;
+
+static axis_t vertical = {
+    .pos_pressed   = false,
+    .neg_pressed   = false,
+    .pos_keycode   = KC_W,
+    .neg_keycode   = KC_S,
+    .current_key   = 0,
+};
+
+static axis_t horizontal = {
+    .pos_pressed   = false,
+    .neg_pressed   = false,
+    .pos_keycode   = KC_D,
+    .neg_keycode   = KC_A,
+    .current_key   = 0,
+};
+
+/**
+ * Generic axis update.
+ *  - ax: pointer to the axis state
+ *  - is_pos: true for pos_keycode (W or D), false for neg_keycode (S or A)
+ *  - pressed: whether the virtual key was pressed
+ */
+void update_axis(axis_t *ax, bool is_pos, bool pressed) {
+    // update pressed state
+    if (is_pos) ax->pos_pressed = pressed;
+    else        ax->neg_pressed = pressed;
+
+    uint16_t to_unregister = 0;
+    uint16_t to_register   = 0;
+
+    // both down: most recent wins
+    if (ax->pos_pressed && ax->neg_pressed) {
+        if (pressed) {
+            to_register   = is_pos ? ax->pos_keycode : ax->neg_keycode;
+            to_unregister = is_pos ? ax->neg_keycode : ax->pos_keycode;
+            ax->current_key = to_register;
+        }
+        // if releasing one but still both pressed, no change here
+    }
+    // only pos held
+    else if (ax->pos_pressed) {
+        to_register   = ax->pos_keycode;
+        to_unregister = (ax->current_key == ax->neg_keycode) ? ax->neg_keycode : 0;
+        ax->current_key = ax->pos_keycode;
+    }
+    // only neg held
+    else if (ax->neg_pressed) {
+        to_register   = ax->neg_keycode;
+        to_unregister = (ax->current_key == ax->pos_keycode) ? ax->pos_keycode : 0;
+        ax->current_key = ax->neg_keycode;
+    }
+    // neither held
+    else {
+        to_unregister   = ax->current_key;
+        ax->current_key = 0;
+    }
+
+    // apply key events
+    if (to_unregister) unregister_code(to_unregister);
+    if (to_register)   register_code(to_register);
+}
 
 // clang-format off
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
 
-//      ESC      F1       F2       F3       F4       F5       F6       F7       F8       F9       F10      F11      F12	     Prt           Rotary(Mute)
-//      ~        1        2        3        4        5        6        7        8        9        0         -       (=)	     BackSpc           Del
-//      Tab      Q        W        E        R        T        Y        U        I        O        P        [        ]        \                 PgUp
-//      Caps     A        S        D        F        G        H        J        K        L        ;        "                 Enter             PgDn
-//      Sh_L              Z        X        C        V        B        N        M        ,        .        ?                 Sh_R     Up       End
-//      Ct_L     Win_L    Alt_L                               SPACE                               Alt_R    FN       Ct_R     Left     Down     Right
-
-
-    // The FN key by default maps to a momentary toggle to layer 1 to provide access to the QK_BOOT key (to put the board into bootloader mode). Without
-    // this mapping, you have to open the case to hit the button on the bottom of the PCB (near the USB cable attachment) while plugging in the USB
-    // cable to get the board into bootloader mode - definitely not fun when you're working on your QMK builds. Remove this and put it back to KC_RGUI
-    // if that's your preference.
-    //
-    // To put the keyboard in bootloader mode, use FN+backslash. If you accidentally put it into bootloader, you can just unplug the USB cable and
-    // it'll be back to normal when you plug it back in.
-    //
-    // This keyboard defaults to 6KRO instead of NKRO for compatibility reasons (some KVMs and BIOSes are incompatible with NKRO).
-    // Since this is, among other things, a "gaming" keyboard, a key combination to enable NKRO on the fly is provided for convenience.
-    // Press Fn+N to toggle between 6KRO and NKRO. This setting is persisted to the EEPROM and thus persists between restarts.
     [0] = LAYOUT(
         KC_ESC,  KC_F1,   KC_F2,   KC_F3,   KC_F4,   KC_F5,   KC_F6,   KC_F7,   KC_F8,   KC_F9,   KC_F10,  KC_F11,  KC_F12,  KC_PSCR,          KC_MUTE,
         KC_GRV,  KC_1,    KC_2,    KC_3,    KC_4,    KC_5,    KC_6,    KC_7,    KC_8,    KC_9,    KC_0,    KC_MINS, KC_EQL,  KC_BSPC,          KC_DEL,
-        KC_TAB,  KC_Q,    KC_W,    KC_E,    KC_R,    KC_T,    KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,    KC_LBRC, KC_RBRC, KC_BSLS,          KC_PGUP,
-        KC_CAPS, KC_A,    KC_S,    KC_D,    KC_F,    KC_G,    KC_H,    KC_J,    KC_K,    KC_L,    KC_SCLN, KC_QUOT,          KC_ENT,           KC_PGDN,
+        KC_TAB,  KC_Q,    L_W,     KC_E,    KC_R,    KC_T,    KC_Y,    KC_U,    KC_I,    KC_O,    KC_P,    KC_LBRC, KC_RBRC, KC_BSLS,          KC_PGUP,
+        KC_CAPS, L_A,     L_S,     L_D,     KC_F,    KC_G,    KC_H,    KC_J,    KC_K,    KC_L,    KC_SCLN, KC_QUOT,          KC_ENT,           KC_PGDN,
         KC_LSFT,          KC_Z,    KC_X,    KC_C,    KC_V,    KC_B,    KC_N,    KC_M,    KC_COMM, KC_DOT,  KC_SLSH,          KC_RSFT, KC_UP,   KC_END,
         KC_LCTL, KC_LGUI, KC_LALT,                            KC_SPC,                             KC_RALT, MO(1),   KC_RCTL, KC_LEFT, KC_DOWN, KC_RGHT
     ),
@@ -52,7 +112,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______, RGB_TOG, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,
         _______, _______, RGB_VAI, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, QK_BOOT,            _______,
         _______, _______, RGB_VAD, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,          _______,
-        _______,          _______, RGB_HUI, _______, _______, _______, NK_TOGG, _______, _______, _______, _______,          _______, RGB_MOD, _______,
+        _______,          RGB_HUI, _______, _______, _______, _______, NK_TOGG, _______, _______, _______, _______,          _______, RGB_MOD, _______,
         _______, _______, _______,                            _______,                            _______, _______, _______, RGB_SPD, RGB_RMOD, RGB_SPI
     ),
 
@@ -86,18 +146,16 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 };
 #endif
 
-// Variables for press detection
-uint16_t encoder_timer = 0;
-uint8_t encoder_press_count = 0;
-uint16_t encoder_timeout_add = 0;
+// -- encoder press/double/triple tap logic --
+static uint16_t encoder_timer        = 0;
+static uint8_t  encoder_press_count  = 0;
+static uint16_t encoder_timeout_add  = 0;
 
 bool encoder_update_user(uint8_t index, bool clockwise) {
-    if (index == 0) { // First encoder
+    if (index == 0) {
         if (clockwise) {
-            // Volume Down
             tap_code_delay(KC_VOLU, 10);
         } else {
-            // Volume Up
             tap_code_delay(KC_VOLD, 10);
         }
     }
@@ -105,37 +163,54 @@ bool encoder_update_user(uint8_t index, bool clockwise) {
 }
 
 void matrix_scan_user(void) {
-    if (encoder_timer && timer_elapsed(encoder_timer) - encoder_timeout_add > 550) {
-        if (encoder_press_count == 3) {
-            // Skip to the previous song
-            tap_code(KC_MEDIA_PREV_TRACK);
-        } else if (encoder_press_count == 2) {
-            // Skip to the next song
-            tap_code(KC_MEDIA_NEXT_TRACK);
-        } else if (encoder_press_count == 1) {
-            // Pause or play
-            tap_code(KC_MEDIA_PLAY_PAUSE);
+    if (encoder_timer &&
+        (timer_elapsed(encoder_timer) - encoder_timeout_add) > 550) {
+        switch (encoder_press_count) {
+            case 3:
+                tap_code(KC_MEDIA_PREV_TRACK);
+                break;
+            case 2:
+                tap_code(KC_MEDIA_NEXT_TRACK);
+                break;
+            case 1:
+                tap_code(KC_MEDIA_PLAY_PAUSE);
+                break;
         }
-        // Reset timer and other variables
-        encoder_timer = 0;
+        encoder_timer       = 0;
         encoder_press_count = 0;
         encoder_timeout_add = 0;
     }
 }
 
+// -- combined process_record_user handler --
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+    bool pressed = record->event.pressed;
+
     switch (keycode) {
-        case KC_MUTE: // Rotary knob press keycode
-            if (record->event.pressed) {
-                // Increment the press count
+        // virtual WASD
+        case L_W:
+            update_axis(&vertical, true, pressed);
+            return false;
+        case L_S:
+            update_axis(&vertical, false, pressed);
+            return false;
+        case L_D:
+            update_axis(&horizontal, true, pressed);
+            return false;
+        case L_A:
+            update_axis(&horizontal, false, pressed);
+            return false;
+
+        // encoder knob press
+        case KC_MUTE:
+            if (pressed) {
                 encoder_press_count++;
-                // Timer
-                encoder_timer = timer_read();
-                // Extend Timer
+                encoder_timer       = timer_read();
                 encoder_timeout_add = timer_elapsed(encoder_timer);
             }
-            return false; // Block key from passing through
+            return false;
+
         default:
-            return true; // Pass other keys through
+            return true;
     }
 }

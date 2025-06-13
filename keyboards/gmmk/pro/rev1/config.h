@@ -18,4 +18,4 @@
 
 /* SPI Config for LED Driver */
 #define SPI_DRIVER SPID1
-#define DEBOUNCE 8
+#define DEBOUNCE 6
