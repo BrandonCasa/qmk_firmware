@@ -164,7 +164,7 @@ bool encoder_update_user(uint8_t index, bool clockwise) {
 
 void matrix_scan_user(void) {
     if (encoder_timer &&
-        (timer_elapsed(encoder_timer) - encoder_timeout_add) > 550) {
+        (timer_elapsed(encoder_timer) - encoder_timeout_add) > 1000) {
         switch (encoder_press_count) {
             case 3:
                 tap_code(KC_MEDIA_PREV_TRACK);
