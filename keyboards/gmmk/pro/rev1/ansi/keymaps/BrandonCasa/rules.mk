@@ -1,5 +1,5 @@
 VIA_ENABLE = yes
 ENCODER_MAP_ENABLE = yes
 ENCODER_ENABLE = yes
-DEBOUNCE_TYPE = asym_eager_defer_pk
+DEBOUNCE_TYPE = sym_defer_g
 USB_POLLING_INTERVAL_MS = 1
