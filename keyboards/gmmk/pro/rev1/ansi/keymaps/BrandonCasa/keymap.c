@@ -15,14 +15,29 @@
  */
 
 #include QMK_KEYBOARD_H
+#include "print.h"
 
 // -- custom virtual WASD keys --
 enum custom_keycodes {
     L_W = SAFE_RANGE,
     L_S,
     L_A,
-    L_D
+    L_D,
+    DB_TOG
 };
+
+// -- debounce toggle state --
+volatile bool debounce_fast_mode = false;
+
+/* Log helper – short and sweet */
+static inline void log_dbg(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    char buf[128];
+    vsnprintf(buf, sizeof(buf), fmt, args);
+    dprintf("%s", buf);
+    va_end(args);
+}
 
 // -- generic axis struct and state --
 typedef struct {
@@ -110,10 +125,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [1] = LAYOUT(
         _______, KC_MYCM, KC_WHOM, KC_CALC, KC_MSEL, KC_MPRV, KC_MNXT, KC_MPLY, KC_MSTP, KC_MUTE, KC_VOLD, KC_VOLU, _______, _______,          _______,
         _______, RGB_TOG, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,
-        _______, _______, RGB_VAI, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, QK_BOOT,            _______,
+        _______, _______, RGB_VAI, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, QK_BOOT,          _______,
         _______, _______, RGB_VAD, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______,          _______,
         _______,          RGB_HUI, _______, _______, _______, _______, NK_TOGG, _______, _______, _______, _______,          _______, RGB_MOD, _______,
-        _______, _______, _______,                            _______,                            _______, _______, _______, RGB_SPD, RGB_RMOD, RGB_SPI
+        DB_TOG,  _______, DB_TOGG,                            _______,                            _______, _______, _______, RGB_SPD, RGB_RMOD, RGB_SPI
     ),
 
     [2] = LAYOUT(
@@ -168,12 +183,15 @@ void matrix_scan_user(void) {
         switch (encoder_press_count) {
             case 3:
                 tap_code(KC_MEDIA_PREV_TRACK);
+                log_dbg("Encoder tap #%u, previous song.\n", encoder_press_count);
                 break;
             case 2:
                 tap_code(KC_MEDIA_NEXT_TRACK);
+                log_dbg("Encoder tap #%u, next song.\n", encoder_press_count);
                 break;
             case 1:
                 tap_code(KC_MEDIA_PLAY_PAUSE);
+                log_dbg("Encoder tap #%u, play/pause music.\n", encoder_press_count);
                 break;
         }
         encoder_timer       = 0;
@@ -201,6 +219,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             update_axis(&horizontal, false, pressed);
             return false;
 
+        // switch to WASD fast debounce mode
+        case DB_TOG:
+            if (pressed) {
+                debounce_fast_mode = !debounce_fast_mode;
+                log_dbg("Debounce fast-mode: %s\n", debounce_fast_mode ? "ON" : "OFF");
+            }
+            return false;
+
         // encoder knob press
         case KC_MUTE:
             if (pressed) {
@@ -214,3 +240,22 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
             return true;
     }
 }
+
+#ifdef RGB_MATRIX_ENABLE
+
+bool rgb_matrix_indicators_user(void) {
+    // RGB colors: teal vs lime green
+    /* lime when “fast-debounce” is ON, teal otherwise */
+    uint8_t r = debounce_fast_mode ? 255  : 0;
+    uint8_t g = 0;
+    uint8_t b = debounce_fast_mode ? 0  : 255;
+
+    rgb_matrix_set_color(72, r, g, b);   // Delete
+    rgb_matrix_set_color(75, r, g, b);   // PgUp
+    rgb_matrix_set_color(86, r, g, b);   // PgDn
+    rgb_matrix_set_color(82, r, g, b);   // End
+
+    return true;
+}
+
+#endif

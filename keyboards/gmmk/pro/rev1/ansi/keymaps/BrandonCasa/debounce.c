@@ -1,12 +1,15 @@
 /*  File: custom.c  (lives in your keymap folder)
- *  Custom symmetric per-key debounce
+ *  Custom symmetric per-key debounce with runtime eager toggle
  *
- *  - All keys defer for DEBOUNCE ms (sym_defer_pk)
- *  - WASD flip immediately, then ignore chatter for DEBOUNCE ms (sym_eager_pk)
+ *  - Default: All keys use sym_defer_pk (delay & validate)
+ *  - Toggle mode: WASD use eager flip + ignore
  *
  *  Works with `DEBOUNCE_TYPE = custom`
  *  No dynamic allocation → compatible with all ChibiOS heap configs.
  */
+
+#define TAP_CODE_DELAY 10
+#define FAST_TYPE_ENABLE
 
 #include "debounce.h"
 #include "timer.h"
@@ -18,12 +21,18 @@
 /* ------------------------------------------------------------------ */
 #define ROW_W 2
 #define COL_W 2
+
 #define ROW_A 3
 #define COL_A 1
+
 #define ROW_S 3
 #define COL_S 2
+
 #define ROW_D 3
 #define COL_D 3
+
+#define ROW_SPC 5
+#define COL_SPC 3
 /* ------------------------------------------------------------------ */
 
 #ifndef DEBOUNCE
@@ -38,6 +47,9 @@
 #define ROW_SHIFTER ((matrix_row_t)1)
 typedef uint8_t debounce_counter_t;
 #define DEBOUNCE_ELAPSED 0
+
+/* External toggle flag from keymap.c */
+extern volatile bool debounce_fast_mode;
 
 /* static → no malloc needed */
 static debounce_counter_t debounce_counters[MATRIX_ROWS * MATRIX_COLS];
@@ -57,16 +69,18 @@ static void update_counters_and_transfer_if_expired(
 static void arm_counters_for_changes(
     matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows);
 
-static inline bool is_wasd(uint8_t row, uint8_t col) {
+static inline bool is_eager_key(uint8_t row, uint8_t col) {
+    if (!debounce_fast_mode) return false;
     return (row == ROW_W && col == COL_W) ||
            (row == ROW_A && col == COL_A) ||
            (row == ROW_S && col == COL_S) ||
-           (row == ROW_D && col == COL_D);
+           (row == ROW_D && col == COL_D) ||
+           (row == ROW_SPC && col == COL_SPC);
 }
 
 /* ------------------------------------------------------------------ */
 void debounce_init(uint8_t num_rows) {
-    (void)num_rows;                          /* keep param for API parity */
+    (void)num_rows;
     for (uint16_t i = 0; i < MATRIX_ROWS * MATRIX_COLS; ++i)
         debounce_counters[i] = DEBOUNCE_ELAPSED;
 
@@ -118,7 +132,8 @@ static void update_counters_and_transfer_if_expired(
 
             if (*ptr <= elapsed) {
                 *ptr = DEBOUNCE_ELAPSED;
-                if (!is_wasd(row, col)) {          /* defer-mode keys flip */
+
+                if (!is_eager_key(row, col)) {  // defer-mode only
                     matrix_row_t mask = ROW_SHIFTER << col;
                     matrix_row_t next = (cooked[row] & ~mask) |
                                         (raw[row]    &  mask);
@@ -126,7 +141,7 @@ static void update_counters_and_transfer_if_expired(
                     cooked[row]       = next;
                 }
             } else {
-                *ptr               -= elapsed;
+                *ptr                 -= elapsed;
                 counters_need_update = true;
             }
         }
@@ -143,18 +158,18 @@ static void arm_counters_for_changes(
 
         for (uint8_t col = 0; col < MATRIX_COLS; ++col, ++ptr) {
             if (!(delta & (ROW_SHIFTER << col))) {
-                *ptr = DEBOUNCE_ELAPSED;           /* stable → reset timer */
+                *ptr = DEBOUNCE_ELAPSED;  // stable → reset timer
                 continue;
             }
 
-            if (is_wasd(row, col)) {
-                cooked[row]       ^= (ROW_SHIFTER << col); /* eager flip */
-                cooked_changed     = true;
-                *ptr               = DEBOUNCE;     /* now ignore chatter  */
+            if (is_eager_key(row, col)) {
+                cooked[row]         ^= (ROW_SHIFTER << col); // eager flip
+                cooked_changed       = true;
+                *ptr                 = DEBOUNCE;              // ignore chatter
                 counters_need_update = true;
             } else {
-                if (*ptr == DEBOUNCE_ELAPSED) {    /* defer: just arm     */
-                    *ptr               = DEBOUNCE;
+                if (*ptr == DEBOUNCE_ELAPSED) {
+                    *ptr                 = DEBOUNCE;
                     counters_need_update = true;
                 }
             }
