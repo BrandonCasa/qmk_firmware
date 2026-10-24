@@ -52,15 +52,10 @@ typedef uint8_t debounce_counter_t;
 extern volatile bool debounce_fast_mode;
 
 /* static → no malloc needed */
-static debounce_counter_t debounce_counters[MATRIX_ROWS * MATRIX_COLS];
+static debounce_counter_t debounce_counters[MATRIX_ROWS_PER_HAND * MATRIX_COLS];
 static fast_timer_t       last_time;
 static bool               counters_need_update;
 static bool               cooked_changed;
-
-/* prototypes required by QMK */
-void debounce_init(uint8_t num_rows);
-bool debounce(matrix_row_t raw[], matrix_row_t cooked[],
-              uint8_t num_rows, bool changed);
 
 /* internal helpers */
 static void update_counters_and_transfer_if_expired(
@@ -79,9 +74,8 @@ static inline bool is_eager_key(uint8_t row, uint8_t col) {
 }
 
 /* ------------------------------------------------------------------ */
-void debounce_init(uint8_t num_rows) {
-    (void)num_rows;
-    for (uint16_t i = 0; i < MATRIX_ROWS * MATRIX_COLS; ++i)
+void debounce_init(void) {
+    for (uint16_t i = 0; i < MATRIX_ROWS_PER_HAND * MATRIX_COLS; ++i)
         debounce_counters[i] = DEBOUNCE_ELAPSED;
 
     counters_need_update = false;
@@ -89,8 +83,8 @@ void debounce_init(uint8_t num_rows) {
     last_time            = timer_read_fast();
 }
 
-bool debounce(matrix_row_t raw[], matrix_row_t cooked[],
-              uint8_t num_rows, bool changed) {
+bool debounce(matrix_row_t raw[], matrix_row_t cooked[], bool changed) {
+    const uint8_t num_rows = MATRIX_ROWS_PER_HAND;
     bool updated_last = false;
     cooked_changed    = false;
 
