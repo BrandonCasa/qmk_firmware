@@ -1,172 +1,103 @@
-/*  File: custom.c  (lives in your keymap folder)
- *  Custom symmetric per-key debounce with runtime eager toggle
- *
- *  - Default: All keys use sym_defer_pk (delay & validate)
- *  - Toggle mode: WASD use eager flip + ignore
- *
- *  Works with `DEBOUNCE_TYPE = custom`
- *  No dynamic allocation → compatible with all ChibiOS heap configs.
- */
-
-#define TAP_CODE_DELAY 10
-#define FAST_TYPE_ENABLE
-
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright 2017 Alex Ong
+// Copyright 2021 Simon Arlott
+// Selective per-key eager/deferred debounce, based on QMK sym_eager_pk.c.
 #include "debounce.h"
 #include "timer.h"
-#include <stdbool.h>
-#include <stdint.h>
+#include "fast_debounce.h"
+#include <string.h>
 
-/* ------------------------------------------------------------------ */
-/*              Tweak these four lines for your board layout          */
-/* ------------------------------------------------------------------ */
-#define ROW_W 2
-#define COL_W 2
+extern bool debounce_fast_mode;
 
-#define ROW_A 3
-#define COL_A 1
+static uint8_t counters[MATRIX_ROWS_PER_HAND][MATRIX_COLS];
+static matrix_row_t previous_raw[MATRIX_ROWS_PER_HAND];
+static matrix_row_t eager[MATRIX_ROWS_PER_HAND];
+static matrix_row_t cooldown[MATRIX_ROWS_PER_HAND];
+static fast_timer_t last_time;
+static bool timers_active;
 
-#define ROW_S 3
-#define COL_S 2
-
-#define ROW_D 3
-#define COL_D 3
-
-#define ROW_SPC 5
-#define COL_SPC 3
-/* ------------------------------------------------------------------ */
-
-#ifndef DEBOUNCE
-#    define DEBOUNCE 5       /* ms, 1–255 */
-#endif
-
-#if DEBOUNCE > UINT8_MAX
-#    undef  DEBOUNCE
-#    define DEBOUNCE UINT8_MAX
-#endif
-
-#define ROW_SHIFTER ((matrix_row_t)1)
-typedef uint8_t debounce_counter_t;
-#define DEBOUNCE_ELAPSED 0
-
-/* External toggle flag from keymap.c */
-extern volatile bool debounce_fast_mode;
-
-/* static → no malloc needed */
-static debounce_counter_t debounce_counters[MATRIX_ROWS_PER_HAND * MATRIX_COLS];
-static fast_timer_t       last_time;
-static bool               counters_need_update;
-static bool               cooked_changed;
-
-/* internal helpers */
-static void update_counters_and_transfer_if_expired(
-    matrix_row_t raw[], matrix_row_t cooked[],
-    uint8_t num_rows, uint8_t elapsed);
-static void arm_counters_for_changes(
-    matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows);
-
-static inline bool is_eager_key(uint8_t row, uint8_t col) {
-    if (!debounce_fast_mode) return false;
-    return (row == ROW_W && col == COL_W) ||
-           (row == ROW_A && col == COL_A) ||
-           (row == ROW_S && col == COL_S) ||
-           (row == ROW_D && col == COL_D) ||
-           (row == ROW_SPC && col == COL_SPC);
-}
-
-/* ------------------------------------------------------------------ */
 void debounce_init(void) {
-    for (uint16_t i = 0; i < MATRIX_ROWS_PER_HAND * MATRIX_COLS; ++i)
-        debounce_counters[i] = DEBOUNCE_ELAPSED;
-
-    counters_need_update = false;
-    cooked_changed       = false;
-    last_time            = timer_read_fast();
+    memset(counters, 0, sizeof(counters));
+    memset(previous_raw, 0, sizeof(previous_raw));
+    memset(eager, 0, sizeof(eager));
+    memset(cooldown, 0, sizeof(cooldown));
+    timers_active = false;
+    // No timer baseline is needed until a counter is armed.
 }
 
 bool debounce(matrix_row_t raw[], matrix_row_t cooked[], bool changed) {
-    const uint8_t num_rows = MATRIX_ROWS_PER_HAND;
-    bool updated_last = false;
-    cooked_changed    = false;
-
-    if (counters_need_update) {
-        fast_timer_t now          = timer_read_fast();
-        fast_timer_t elapsed_fast = TIMER_DIFF_FAST(now, last_time);
-        uint8_t      elapsed      = (elapsed_fast > UINT8_MAX)
-                                        ? UINT8_MAX
-                                        : (uint8_t)elapsed_fast;
-
-        last_time     = now;
-        updated_last  = true;
-
-        if (elapsed)
-            update_counters_and_transfer_if_expired(
-                raw, cooked, num_rows, elapsed);
+    if (!changed && !timers_active) {
+        return false;
     }
-
-    if (changed) {
-        if (!updated_last)
-            last_time = timer_read_fast();
-        arm_counters_for_changes(raw, cooked, num_rows);
+    fast_timer_t now = timer_read_fast();
+    fast_timer_t dt  = timers_active ? TIMER_DIFF_FAST(now, last_time) : 0;
+    if (!changed && dt == 0) {
+        return false;
     }
+    uint8_t elapsed     = dt > UINT8_MAX ? UINT8_MAX : dt;
+    last_time           = now; // Reconsider pending raw differences on timer expiry.
+    timers_active       = false;
+    bool cooked_changed = false;
 
-    return cooked_changed;
-}
+    for (uint8_t row = 0; row < MATRIX_ROWS_PER_HAND; ++row) {
+        matrix_row_t edges = raw[row] ^ previous_raw[row];
+        for (uint8_t col = 0; col < MATRIX_COLS; ++col) {
+            matrix_row_t mask = MATRIX_ROW_SHIFTER << col;
+            uint8_t *counter  = &counters[row][col];
+            bool down         = (raw[row] & mask) != 0;
 
-/* ------------------------------------------------------------------ */
-static void update_counters_and_transfer_if_expired(
-    matrix_row_t raw[], matrix_row_t cooked[],
-    uint8_t num_rows, uint8_t elapsed) {
-
-    counters_need_update = false;
-    debounce_counter_t *ptr = debounce_counters;
-
-    for (uint8_t row = 0; row < num_rows; ++row) {
-        for (uint8_t col = 0; col < MATRIX_COLS; ++col, ++ptr) {
-            if (*ptr == DEBOUNCE_ELAPSED) continue;
-
-            if (*ptr <= elapsed) {
-                *ptr = DEBOUNCE_ELAPSED;
-
-                if (!is_eager_key(row, col)) {  // defer-mode only
-                    matrix_row_t mask = ROW_SHIFTER << col;
-                    matrix_row_t next = (cooked[row] & ~mask) |
-                                        (raw[row]    &  mask);
-                    cooked_changed   |= (cooked[row] ^ next);
-                    cooked[row]       = next;
+            // Latch policy only when previously idle and fully released.
+            // Pending debounce and held keys finish under their original policy.
+            if (!*counter && !(previous_raw[row] & mask) && !(cooked[row] & mask)) {
+                if (debounce_fast_mode && is_fast_debounce_position(row, col)) {
+                    eager[row] |= mask;
+                } else {
+                    eager[row] &= ~mask;
                 }
-            } else {
-                *ptr                 -= elapsed;
-                counters_need_update = true;
             }
-        }
-    }
-}
 
-static void arm_counters_for_changes(
-    matrix_row_t raw[], matrix_row_t cooked[], uint8_t num_rows) {
+            bool is_eager    = (eager[row] & mask) != 0;
+            bool is_cooldown = (cooldown[row] & mask) != 0;
+            if (*counter) {
+                // A deferred candidate needs a full stable interval after every
+                // raw edge, including an edge on the expiry scan.
+                if (!is_cooldown && (edges & mask)) {
+                    *counter = is_eager ? FAST_RELEASE_DEBOUNCE : DEBOUNCE;
+                } else {
+                    *counter = *counter > elapsed ? *counter - elapsed : 0;
+                }
+                if (!*counter) {
+                    cooldown[row] &= ~mask;
+                    if (!is_cooldown && ((raw[row] ^ cooked[row]) & mask)) {
+                        cooked[row] ^= mask;
+                        cooked_changed = true;
+                    }
+                }
+            }
 
-    debounce_counter_t *ptr = debounce_counters;
-
-    for (uint8_t row = 0; row < num_rows; ++row) {
-        matrix_row_t delta = raw[row] ^ cooked[row];
-
-        for (uint8_t col = 0; col < MATRIX_COLS; ++col, ++ptr) {
-            if (!(delta & (ROW_SHIFTER << col))) {
-                *ptr = DEBOUNCE_ELAPSED;  // stable → reset timer
+            if (is_cooldown && *counter) {
+                // Never cancel eager lockout merely because raw == cooked.
+                timers_active = true;
                 continue;
             }
 
-            if (is_eager_key(row, col)) {
-                cooked[row]         ^= (ROW_SHIFTER << col); // eager flip
-                cooked_changed       = true;
-                *ptr                 = DEBOUNCE;              // ignore chatter
-                counters_need_update = true;
-            } else {
-                if (*ptr == DEBOUNCE_ELAPSED) {
-                    *ptr                 = DEBOUNCE;
-                    counters_need_update = true;
+            if ((raw[row] ^ cooked[row]) & mask) {
+                if (!*counter) {
+                    if (is_eager && (down || !FAST_DEBOUNCE_DEFER_RELEASE)) {
+                        cooked[row] ^= mask;
+                        cooked_changed = true;
+                        *counter = down ? FAST_PRESS_DEBOUNCE : FAST_RELEASE_DEBOUNCE;
+                        cooldown[row] |= mask;
+                    } else {
+                        *counter = is_eager ? FAST_RELEASE_DEBOUNCE : DEBOUNCE;
+                    }
                 }
+            } else if (!(cooldown[row] & mask)) {
+                *counter = 0; // A deferred candidate returned to cooked state.
             }
+            timers_active |= *counter != 0;
         }
+        previous_raw[row] = raw[row];
     }
+    return cooked_changed;
 }

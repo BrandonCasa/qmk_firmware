@@ -17,17 +17,9 @@
 #include QMK_KEYBOARD_H
 #include "print.h"
 
-// -- custom virtual WASD keys --
-enum custom_keycodes {
-    L_W = SAFE_RANGE,
-    L_S,
-    L_A,
-    L_D,
-    DB_TOG
-};
+#include "socd.h"
 
-// -- debounce toggle state --
-volatile bool debounce_fast_mode = false;
+bool debounce_fast_mode = false;
 
 /* Log helper – short and sweet */
 static inline void log_dbg(const char *fmt, ...) {
@@ -37,77 +29,6 @@ static inline void log_dbg(const char *fmt, ...) {
     vsnprintf(buf, sizeof(buf), fmt, args);
     dprintf("%s", buf);
     va_end(args);
-}
-
-// -- generic axis struct and state --
-typedef struct {
-    bool     pos_pressed;
-    bool     neg_pressed;
-    uint16_t pos_keycode;
-    uint16_t neg_keycode;
-    uint16_t current_key;
-} axis_t;
-
-static axis_t vertical = {
-    .pos_pressed   = false,
-    .neg_pressed   = false,
-    .pos_keycode   = KC_W,
-    .neg_keycode   = KC_S,
-    .current_key   = 0,
-};
-
-static axis_t horizontal = {
-    .pos_pressed   = false,
-    .neg_pressed   = false,
-    .pos_keycode   = KC_D,
-    .neg_keycode   = KC_A,
-    .current_key   = 0,
-};
-
-/**
- * Generic axis update.
- *  - ax: pointer to the axis state
- *  - is_pos: true for pos_keycode (W or D), false for neg_keycode (S or A)
- *  - pressed: whether the virtual key was pressed
- */
-void update_axis(axis_t *ax, bool is_pos, bool pressed) {
-    // update pressed state
-    if (is_pos) ax->pos_pressed = pressed;
-    else        ax->neg_pressed = pressed;
-
-    uint16_t to_unregister = 0;
-    uint16_t to_register   = 0;
-
-    // both down: most recent wins
-    if (ax->pos_pressed && ax->neg_pressed) {
-        if (pressed) {
-            to_register   = is_pos ? ax->pos_keycode : ax->neg_keycode;
-            to_unregister = is_pos ? ax->neg_keycode : ax->pos_keycode;
-            ax->current_key = to_register;
-        }
-        // if releasing one but still both pressed, no change here
-    }
-    // only pos held
-    else if (ax->pos_pressed) {
-        to_register   = ax->pos_keycode;
-        to_unregister = (ax->current_key == ax->neg_keycode) ? ax->neg_keycode : 0;
-        ax->current_key = ax->pos_keycode;
-    }
-    // only neg held
-    else if (ax->neg_pressed) {
-        to_register   = ax->neg_keycode;
-        to_unregister = (ax->current_key == ax->pos_keycode) ? ax->pos_keycode : 0;
-        ax->current_key = ax->neg_keycode;
-    }
-    // neither held
-    else {
-        to_unregister   = ax->current_key;
-        ax->current_key = 0;
-    }
-
-    // apply key events
-    if (to_unregister) unregister_code(to_unregister);
-    if (to_register)   register_code(to_register);
 }
 
 // clang-format off
@@ -162,41 +83,43 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #endif
 
 // -- encoder press/double/triple tap logic --
-static uint16_t encoder_timer        = 0;
-static uint8_t  encoder_press_count  = 0;
-static uint16_t encoder_timeout_add  = 0;
+static uint16_t encoder_timer       = 0;
+static uint8_t  encoder_press_count = 0;
+static bool     encoder_waiting     = false;
+static uint8_t  media_key           = KC_NO;
+static uint16_t media_timer         = 0;
 
-bool encoder_update_user(uint8_t index, bool clockwise) {
-    if (index == 0) {
-        if (clockwise) {
-            tap_code_delay(KC_VOLU, 10);
-        } else {
-            tap_code_delay(KC_VOLD, 10);
-        }
-    }
-    return false;
+static void start_media_tap(uint8_t keycode) {
+    media_key   = keycode;
+    media_timer = timer_read();
+    register_code(media_key);
 }
 
 void matrix_scan_user(void) {
-    if (encoder_timer &&
-        (timer_elapsed(encoder_timer) - encoder_timeout_add) > 1000) {
+    // Preserve the board's consumer-key hold interval without tap_code()'s
+    // blocking wait. Direction keys keep processing while the media key is down.
+    if (media_key != KC_NO && timer_elapsed(media_timer) >= TAP_CODE_DELAY) {
+        unregister_code(media_key);
+        media_key = KC_NO;
+    }
+    if (encoder_waiting && timer_elapsed(encoder_timer) > 1000) {
         switch (encoder_press_count) {
             case 3:
-                tap_code(KC_MEDIA_PREV_TRACK);
+                start_media_tap(KC_MEDIA_PREV_TRACK);
                 log_dbg("Encoder tap #%u, previous song.\n", encoder_press_count);
                 break;
             case 2:
-                tap_code(KC_MEDIA_NEXT_TRACK);
+                start_media_tap(KC_MEDIA_NEXT_TRACK);
                 log_dbg("Encoder tap #%u, next song.\n", encoder_press_count);
                 break;
             case 1:
-                tap_code(KC_MEDIA_PLAY_PAUSE);
+                start_media_tap(KC_MEDIA_PLAY_PAUSE);
                 log_dbg("Encoder tap #%u, play/pause music.\n", encoder_press_count);
                 break;
         }
         encoder_timer       = 0;
         encoder_press_count = 0;
-        encoder_timeout_add = 0;
+        encoder_waiting     = false;
     }
 }
 
@@ -204,22 +127,18 @@ void matrix_scan_user(void) {
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     bool pressed = record->event.pressed;
 
-    switch (keycode) {
-        // virtual WASD
-        case L_W:
-            update_axis(&vertical, true, pressed);
-            return false;
-        case L_S:
-            update_axis(&vertical, false, pressed);
-            return false;
-        case L_D:
-            update_axis(&horizontal, true, pressed);
-            return false;
-        case L_A:
-            update_axis(&horizontal, false, pressed);
-            return false;
+    if (!process_socd(keycode, record)) {
+        return false;
+    }
 
-        // switch to WASD fast debounce mode
+    // QMK's magic handler clears the report (including when toggling NKRO).
+    // Clear ownership too, so a later release cannot revive an old direction.
+    if (pressed && IS_QK_MAGIC(keycode)) {
+        reset_socd();
+    }
+
+    switch (keycode) {
+        // switch selective WASD + Space debounce policy (SOCD is always enabled)
         case DB_TOG:
             if (pressed) {
                 debounce_fast_mode = !debounce_fast_mode;
@@ -230,9 +149,11 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         // encoder knob press
         case KC_MUTE:
             if (pressed) {
-                encoder_press_count++;
+                if (encoder_press_count < 4) {
+                    encoder_press_count++;
+                }
                 encoder_timer       = timer_read();
-                encoder_timeout_add = timer_elapsed(encoder_timer);
+                encoder_waiting     = true;
             }
             return false;
 
@@ -244,8 +165,7 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 #ifdef RGB_MATRIX_ENABLE
 
 bool rgb_matrix_indicators_user(void) {
-    // RGB colors: teal vs lime green
-    /* lime when “fast-debounce” is ON, teal otherwise */
+    // Red when fast debounce is selected, blue otherwise.
     uint8_t r = debounce_fast_mode ? 255  : 0;
     uint8_t g = 0;
     uint8_t b = debounce_fast_mode ? 0  : 255;
@@ -259,3 +179,22 @@ bool rgb_matrix_indicators_user(void) {
 }
 
 #endif
+
+// Drop SOCD ownership across suspend. Held directions must be released and
+// pressed again after wake; releasing a stale loser cannot reactivate anything.
+void suspend_power_down_user(void) {
+    reset_socd();
+    send_keyboard_report();
+    if (media_key != KC_NO) {
+        unregister_code(media_key);
+        media_key = KC_NO;
+    }
+    encoder_timer       = 0;
+    encoder_press_count = 0;
+    encoder_waiting     = false;
+}
+
+void suspend_wakeup_init_user(void) {
+    // ChibiOS calls this from an ISR: memory changes only, no USB or logging.
+    reset_socd();
+}
